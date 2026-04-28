@@ -1,6 +1,6 @@
 # insighta-backend
 
-A RESTful API backend for profile data management built with Express and TypeScript.
+A RESTful API backend for profile data management built with Express, TypeScript, and Bun runtime.
 
 ## Features
 
@@ -12,7 +12,9 @@ A RESTful API backend for profile data management built with Express and TypeScr
 - Rate limiting (auth: 10/min, API: 60/min)
 - API versioning via `x-api-version` header
 - Environment variable validation with Zod
-- In-memory data storage (users, profiles, tokens)
+- MongoDB integration with Mongoose
+- Logging with Morgan
+- CLI table output with chalk and cli-table3
 
 ## Environment Variables
 
@@ -28,16 +30,21 @@ NODE_ENV=development
 
 Environment validation is handled by `src/env.ts` using Zod.
 
+## Prerequisites
+
+- [Bun](https://bun.sh/) runtime installed
+- MongoDB database (local or Atlas)
+
 ## Installation
 
 ```bash
-npm install
+bun install
 ```
 
 ## Running
 
 ```bash
-npm run dev
+bun run dev
 ```
 
 Server runs on port 4000 by default (configurable via PORT env variable).
@@ -74,9 +81,9 @@ All `/api` routes require `x-api-version` header to be present.
 ## Scripts
 
 ```bash
-npm run dev          # Start development server
-npm run build        # Build the project
-npm run start        # Start production server
+bun run dev          # Start development server with hot reload
+bun run build        # Build for production (outputs to dist/)
+bun run start        # Start production server
 ```
 
 ## Project Structure
