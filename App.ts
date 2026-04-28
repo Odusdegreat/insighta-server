@@ -2,9 +2,9 @@ import express from "express";
 import morgan from "morgan";
 import cors from "cors";
 
-import authRoutes from "./modules/auth/auth.routes";
-import profileRoutes from "./modules/profiles/profile.routes";
-import { versionMiddleware } from "./middleware/version.middleware";
+import authRoutes from "./src/modules/auth/auth.routes";
+import profileRoutes from "./src/modules/profiles/profile.routes";
+import { versionMiddleware } from "./src/middleware/version.middleware";
 
 const app = express();
 

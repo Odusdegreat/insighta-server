@@ -39,6 +39,8 @@
     "zod": "^4.3.6"
   },
   "scripts": {
-    "dev": "bun index.ts"
+    "dev": "bun index.ts",
+    "build": "bun build index.ts --outdir dist --target node",
+    "start": "bun dist/index.js"
   }
 }
