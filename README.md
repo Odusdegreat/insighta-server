@@ -1,78 +1,83 @@
 # insighta-backend
 
-A RESTful API backend for profile data management built with Express and Bun.
+A RESTful API backend for profile data management built with NestJS.
 
 ## Features
 
 - Profile management with filtering, sorting, and pagination
 - Natural language search query support
-- Data persistence via JSON file storage
+- Authentication module
+- Environment variable validation with Zod
 - Input validation with proper error handling
 
 ## API Endpoints
 
-### GET /api/profiles
+API endpoints are organized by modules under the standard NestJS structure.
 
-Returns profiles with support for filtering, sorting, and pagination.
+### Auth Module
+- `POST /auth/register` - User registration
+- `POST /auth/login` - User login
+- `POST /auth/refresh` - Refresh access token
 
-**Query Parameters:**
+### Profiles Module
+- `GET /profiles` - List profiles with filtering, sorting, and pagination
+- `GET /profiles/search` - Natural language search for profiles
+- `GET /profiles/:id` - Get profile by ID
+- `POST /profiles` - Create new profile
+- `PUT /profiles/:id` - Update profile
+- `DELETE /profiles/:id` - Delete profile
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| gender | string | Filter by gender (male/female) |
-| age_group | string | Filter by age group (child/teenager/adult/senior) |
-| country_id | string | Filter by country code |
-| min_age | number | Minimum age filter (0-120) |
-| max_age | number | Maximum age filter (0-120) |
-| min_gender_probability | number | Minimum gender probability |
-| min_country_probability | number | Minimum country probability |
-| sort_by | string | Sort field (name/age/gender_probability/country_probability) |
-| order | string | Sort order (asc/desc) |
-| page | number | Page number (default: 1) |
-| limit | number | Results per page, max 100 (default: 10) |
+## Environment Variables
 
-**Response:**
-```json
-{
-  "status": "success",
-  "page": 1,
-  "limit": 10,
-  "total": 100,
-  "data": [...]
-}
+Create a `.env` file in the root directory with the following variables:
+
+```
+PORT=3000
+DATABASE_URL=your_database_url
+JWT_SECRET=your_32_character_secret_key_minimum
+NODE_ENV=development
 ```
 
-### GET /api/profiles/search
-
-Natural language search endpoint for profile queries.
-
-**Query Parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| q | string | Natural language query |
-
-**Supported queries:**
-- "young males" - Males aged 16-24
-- "females above 30" - Females aged 30+
-- "people from [country]" - Profiles from specified country
-- "adult males from [country]" - Adult males from specified country
-- "teenagers above 17" - Teenagers aged 17+
+Environment validation is handled by `src/env.ts` using Zod.
 
 ## Installation
 
 ```bash
-bun install
+npm install
 ```
 
 ## Running
 
 ```bash
-bun run dev
+npm run start:dev
 ```
 
-Server runs on port 4000 by default.
+Server runs on port 3000 by default (configurable via PORT env variable).
 
-## Data
+## Modules
 
-Profiles are stored in `data/profiles.json`. If the file is empty or missing, sample data is automatically generated on startup.
+- **Auth Module** - Authentication and authorization
+- **Profiles Module** - Profile management with filtering, sorting, and pagination
+
+## Scripts
+
+```bash
+npm run build        # Build the project
+npm run start        # Start production server
+npm run start:dev    # Start development server with hot reload
+npm run test         # Run tests
+npm run test:e2e     # Run end-to-end tests
+npm run lint         # Run linter
+```
+
+## Project Structure
+
+```
+src/
+├── env.ts              # Environment validation
+├── app.module.ts       # Root module
+├── main.ts             # Entry point
+└── modules/
+    ├── auth/           # Authentication module
+    └── profiles/       # Profiles module
+```
