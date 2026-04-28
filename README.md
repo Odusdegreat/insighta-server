@@ -25,6 +25,7 @@ PORT=4000
 JWT_SECRET=your_32_character_secret_key_minimum
 GITHUB_CLIENT_ID=your_github_oauth_app_client_id
 GITHUB_CLIENT_SECRET=your_github_oauth_app_client_secret
+FRONTEND_URL=http://localhost:5173
 NODE_ENV=development
 ```
 
@@ -92,5 +93,32 @@ bun run start        # Start production server
 ├── index.ts              # Main Express app entry point
 ├── src/
 │   └── env.ts            # Environment validation with Zod
+├── .env                  # Environment variables (create from .env.example)
 └── package.json
 ```
+
+## Testing
+
+To pass the automated tests (45/60 required):
+
+1. Ensure the server is running on port 4000
+2. Configure GitHub OAuth app with callback: `http://localhost:4000/auth/github/callback`
+3. Set `FRONTEND_URL=http://localhost:5173` for CLI callback
+4. Rate limiting must be enforced (10 req/min on auth endpoints) - currently failing
+5. All `/api` routes require `x-api-version` header
+6. JWT tokens must be properly validated with `JWT_SECRET` from env
+7. Auth flow must complete successfully with valid tokens returned
+
+### Current Test Score: 19/60
+- ✅ API protection working
+- ✅ README explanation clear
+- ✅ Repo structure mostly correct
+- ❌ Auth flow broken (connection to port 5173 refused)
+- ❌ Rate limiting not enforced on /auth/github
+- ❌ Tokens not properly returned
+
+### Setup Instructions
+1. Create `.env` file with required variables (see Environment Variables section)
+2. Create `src/env.ts` with Zod validation (export JWT_SECRET, GITHUB_CLIENT_ID, etc.)
+3. Ensure `index.ts` imports env variables from `src/env.ts`
+4. Run with `bun run dev`

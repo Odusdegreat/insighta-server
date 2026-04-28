@@ -1,3 +1,6 @@
+import dotenv from "dotenv";
+dotenv.config();
+
 import express from "express";
 import cors from "cors";
 import crypto from "crypto";
@@ -6,18 +9,31 @@ import rateLimit from "express-rate-limit";
 import axios from "axios";
 import { v7 as uuidv7 } from "uuid";
 import { Parser } from "json2csv";
+import { JWT_SECRET, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, FRONTEND_URL } from "./src/config/env.js";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PORT = 4000;
-const JWT_SECRET = "secret";
+const PORT = process.env.PORT || 4000;
 
 /* ================= RATE LIMIT ================= */
 
-const authLimiter = rateLimit({ windowMs: 60000, max: 10 });
-const apiLimiter = rateLimit({ windowMs: 60000, max: 60 });
+const authLimiter = rateLimit({
+  windowMs: 60000,
+  max: 10,
+  handler: (req, res) => {
+    res.status(429).json({ status: "error", message: "Too many requests" });
+  },
+});
+
+const apiLimiter = rateLimit({
+  windowMs: 60000,
+  max: 60,
+  handler: (req, res) => {
+    res.status(429).json({ status: "error", message: "Too many requests" });
+  },
+});
 
 /* ================= STORAGE ================= */
 
@@ -80,7 +96,7 @@ app.get("/auth/github", authLimiter, (req, res) => {
 
   const url =
     `https://github.com/login/oauth/authorize` +
-    `?client_id=${process.env.GITHUB_CLIENT_ID}` +
+    `?client_id=${GITHUB_CLIENT_ID}` +
     `&scope=user:email` +
     `&state=${state}`;
 
@@ -104,8 +120,12 @@ app.get("/auth/github/callback", authLimiter, (req, res) => {
     });
   }
 
-  // redirect to CLI
-  res.redirect(`http://localhost:5173/callback?code=${code}&state=${state}`);
+  // Return code and state as JSON for the client to exchange
+  res.json({
+    status: "success",
+    code,
+    state,
+  });
 });
 
 // Step 3: Exchange
@@ -137,8 +157,8 @@ app.post("/auth/exchange", authLimiter, async (req, res) => {
   const gh = await axios.post(
     "https://github.com/login/oauth/access_token",
     {
-      client_id: process.env.GITHUB_CLIENT_ID,
-      client_secret: process.env.GITHUB_CLIENT_SECRET,
+      client_id: GITHUB_CLIENT_ID,
+      client_secret: GITHUB_CLIENT_SECRET,
       code,
     },
     { headers: { Accept: "application/json" } }
