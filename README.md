@@ -1,40 +1,28 @@
 # insighta-backend
 
-A RESTful API backend for profile data management built with NestJS.
+A RESTful API backend for profile data management built with Express and TypeScript.
 
 ## Features
 
-- Profile management with filtering, sorting, and pagination
-- Natural language search query support
-- Authentication module
+- GitHub OAuth 2.0 with PKCE flow
+- JWT-based authentication with access/refresh tokens
+- Role-based access control (admin, analyst)
+- Profile management with pagination
+- CSV export functionality
+- Rate limiting (auth: 10/min, API: 60/min)
+- API versioning via `x-api-version` header
 - Environment variable validation with Zod
-- Input validation with proper error handling
-
-## API Endpoints
-
-API endpoints are organized by modules under the standard NestJS structure.
-
-### Auth Module
-- `POST /auth/register` - User registration
-- `POST /auth/login` - User login
-- `POST /auth/refresh` - Refresh access token
-
-### Profiles Module
-- `GET /profiles` - List profiles with filtering, sorting, and pagination
-- `GET /profiles/search` - Natural language search for profiles
-- `GET /profiles/:id` - Get profile by ID
-- `POST /profiles` - Create new profile
-- `PUT /profiles/:id` - Update profile
-- `DELETE /profiles/:id` - Delete profile
+- In-memory data storage (users, profiles, tokens)
 
 ## Environment Variables
 
 Create a `.env` file in the root directory with the following variables:
 
 ```
-PORT=3000
-DATABASE_URL=your_database_url
+PORT=4000
 JWT_SECRET=your_32_character_secret_key_minimum
+GITHUB_CLIENT_ID=your_github_oauth_app_client_id
+GITHUB_CLIENT_SECRET=your_github_oauth_app_client_secret
 NODE_ENV=development
 ```
 
@@ -49,35 +37,53 @@ npm install
 ## Running
 
 ```bash
-npm run start:dev
+npm run dev
 ```
 
-Server runs on port 3000 by default (configurable via PORT env variable).
+Server runs on port 4000 by default (configurable via PORT env variable).
 
-## Modules
+## API Endpoints
 
-- **Auth Module** - Authentication and authorization
-- **Profiles Module** - Profile management with filtering, sorting, and pagination
+### Authentication (GitHub OAuth with PKCE)
+
+- `GET /auth/github` - Initiate GitHub OAuth with PKCE (rate limited: 10/min)
+- `GET /auth/github/callback` - GitHub OAuth callback
+- `POST /auth/exchange` - Exchange code for tokens (rate limited: 10/min)
+- `POST /auth/refresh` - Refresh access token (rate limited: 10/min)
+- `POST /auth/logout` - Logout and invalidate refresh token
+
+### User
+
+- `GET /api/users/me` - Get current user profile (requires auth)
+
+### Profiles
+
+- `GET /api/profiles` - List profiles with pagination (requires auth + API version header)
+- `POST /api/profiles` - Create profile (requires auth, admin only)
+- `GET /api/profiles/export` - Export profiles as CSV (requires auth)
+
+## Rate Limiting
+
+- Auth endpoints: 10 requests per minute
+- API endpoints: 60 requests per minute
+
+## API Versioning
+
+All `/api` routes require `x-api-version` header to be present.
 
 ## Scripts
 
 ```bash
+npm run dev          # Start development server
 npm run build        # Build the project
 npm run start        # Start production server
-npm run start:dev    # Start development server with hot reload
-npm run test         # Run tests
-npm run test:e2e     # Run end-to-end tests
-npm run lint         # Run linter
 ```
 
 ## Project Structure
 
 ```
-src/
-├── env.ts              # Environment validation
-├── app.module.ts       # Root module
-├── main.ts             # Entry point
-└── modules/
-    ├── auth/           # Authentication module
-    └── profiles/       # Profiles module
+├── index.ts              # Main Express app entry point
+├── src/
+│   └── env.ts            # Environment validation with Zod
+└── package.json
 ```
