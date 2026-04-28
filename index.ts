@@ -1,73 +1,38 @@
 import express from "express";
 import cors from "cors";
-import jwt from "jsonwebtoken";
 import crypto from "crypto";
+import jwt from "jsonwebtoken";
+import rateLimit from "express-rate-limit";
+import axios from "axios";
 import { v7 as uuidv7 } from "uuid";
 import { Parser } from "json2csv";
-import type { Request, Response, NextFunction } from "express";
-import { readFileSync, writeFileSync } from "fs";
-import path from "path";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PORT = process.env.PORT || 4000;
-const JWT_SECRET = process.env.JWT_SECRET || "secret";
+const PORT = 4000;
+const JWT_SECRET = "secret";
 
-/* ================= AUTH (SIMPLE FOR NOW) ================= */
+/* ================= RATE LIMIT ================= */
 
+const authLimiter = rateLimit({ windowMs: 60000, max: 10 });
+const apiLimiter = rateLimit({ windowMs: 60000, max: 60 });
+
+/* ================= STORAGE ================= */
+
+let users: any[] = [];
 let refreshTokens: any[] = [];
+let pkceStore = new Map();
 
-const generateAccessToken = (user: any) => {
-  return jwt.sign(user, JWT_SECRET, { expiresIn: "3m" });
-};
+/* ================= UTILS ================= */
 
-app.get("/auth/github", (req, res) => {
-  res.send("Simulated login → return tokens manually for now");
-});
-
-app.get("/auth/github/callback", (req, res) => {
-  const user = { id: "1", role: "admin" };
-
-  const access_token = generateAccessToken(user);
-  const refresh_token = crypto.randomBytes(40).toString("hex");
-
-  refreshTokens.push({ token: refresh_token, user });
-
-  res.json({
-    status: "success",
-    access_token,
-    refresh_token,
-  });
-});
-
-app.post("/auth/refresh", (req, res) => {
-  const { refresh_token } = req.body;
-
-  const stored = refreshTokens.find(t => t.token === refresh_token);
-  if (!stored) {
-    return res.status(401).json({ status: "error", message: "Invalid token" });
-  }
-
-  // rotate token
-  refreshTokens = refreshTokens.filter(t => t.token !== refresh_token);
-
-  const newAccess = generateAccessToken(stored.user);
-  const newRefresh = crypto.randomBytes(40).toString("hex");
-
-  refreshTokens.push({ token: newRefresh, user: stored.user });
-
-  res.json({
-    status: "success",
-    access_token: newAccess,
-    refresh_token: newRefresh,
-  });
-});
+const signAccess = (user: any) =>
+  jwt.sign(user, JWT_SECRET, { expiresIn: "3m" });
 
 /* ================= MIDDLEWARE ================= */
 
-const authMiddleware = (req: any, res: Response, next: NextFunction) => {
+const auth = (req: any, res: any, next: any) => {
   const token = req.headers.authorization?.split(" ")[1];
 
   if (!token)
@@ -81,16 +46,14 @@ const authMiddleware = (req: any, res: Response, next: NextFunction) => {
   }
 };
 
-const requireRole = (roles: string[]) => {
-  return (req: any, res: Response, next: NextFunction) => {
-    if (!roles.includes(req.user.role)) {
-      return res.status(403).json({ status: "error", message: "Forbidden" });
-    }
-    next();
-  };
+const allow = (roles: string[]) => (req: any, res: any, next: any) => {
+  if (!roles.includes(req.user.role)) {
+    return res.status(403).json({ status: "error", message: "Forbidden" });
+  }
+  next();
 };
 
-const versionMiddleware = (req: Request, res: Response, next: NextFunction) => {
+const version = (req: any, res: any, next: any) => {
   if (!req.headers["x-api-version"]) {
     return res.status(400).json({
       status: "error",
@@ -100,125 +63,226 @@ const versionMiddleware = (req: Request, res: Response, next: NextFunction) => {
   next();
 };
 
-app.use("/api", versionMiddleware);
+/* ================= AUTH ================= */
 
-/* ================= DATA ================= */
+// Step 1: Redirect with PKCE
+app.get("/auth/github", authLimiter, (req, res) => {
+  const { code_challenge, state } = req.query;
 
-const dataPath = path.join(process.cwd(), "data/profiles.json");
-
-let profiles: any[] = [];
-
-try {
-  const data = readFileSync(dataPath, "utf8");
-  profiles = JSON.parse(data);
-} catch {
-  for (let i = 0; i < 2026; i++) {
-    profiles.push({
-      id: uuidv7(),
-      name: `Person ${i + 1}`,
-      gender: i % 2 === 0 ? "male" : "female",
-      gender_probability: Math.random(),
-      age: Math.floor(Math.random() * 100),
-      age_group:
-        i % 4 === 0
-          ? "child"
-          : i % 4 === 1
-          ? "teenager"
-          : i % 4 === 2
-          ? "adult"
-          : "senior",
-      country_id: i % 3 === 0 ? "NG" : i % 3 === 1 ? "BJ" : "GH",
-      country_name:
-        i % 3 === 0 ? "Nigeria" : i % 3 === 1 ? "Benin" : "Ghana",
-      country_probability: Math.random(),
-      created_at: new Date().toISOString(),
+  if (!code_challenge || !state) {
+    return res.status(400).json({
+      status: "error",
+      message: "Missing PKCE parameters",
     });
   }
 
-  writeFileSync(dataPath, JSON.stringify(profiles, null, 2));
-}
+  pkceStore.set(state, code_challenge);
 
-/* ================= PROFILES ================= */
+  const url =
+    `https://github.com/login/oauth/authorize` +
+    `?client_id=${process.env.GITHUB_CLIENT_ID}` +
+    `&scope=user:email` +
+    `&state=${state}`;
 
-app.get("/api/profiles", authMiddleware, (req: any, res: Response) => {
-  let result = [...profiles];
+  res.redirect(url);
+});
 
-  const { gender, min_age, max_age, page = "1", limit = "10" } = req.query;
+// Step 2: GitHub callback
+app.get("/auth/github/callback", authLimiter, (req, res) => {
+  const { code, state } = req.query;
 
-  if (gender) result = result.filter(p => p.gender === gender);
-  if (min_age) result = result.filter(p => p.age >= Number(min_age));
-  if (max_age) result = result.filter(p => p.age <= Number(max_age));
+  if (!code)
+    return res.status(400).json({ status: "error", message: "Missing code" });
 
-  const pageNum = Number(page);
-  const limitNum = Number(limit);
+  if (!state)
+    return res.status(400).json({ status: "error", message: "Missing state" });
 
-  const total = result.length;
-  const total_pages = Math.ceil(total / limitNum);
+  if (!pkceStore.has(state)) {
+    return res.status(400).json({
+      status: "error",
+      message: "Invalid state",
+    });
+  }
 
-  const data = result.slice((pageNum - 1) * limitNum, pageNum * limitNum);
+  // redirect to CLI
+  res.redirect(`http://localhost:5173/callback?code=${code}&state=${state}`);
+});
+
+// Step 3: Exchange
+app.post("/auth/exchange", authLimiter, async (req, res) => {
+  const { code, code_verifier, state } = req.body;
+
+  if (!code || !code_verifier || !state) {
+    return res.status(400).json({
+      status: "error",
+      message: "Missing parameters",
+    });
+  }
+
+  const stored = pkceStore.get(state);
+
+  const hash = crypto
+    .createHash("sha256")
+    .update(code_verifier)
+    .digest("base64url");
+
+  if (hash !== stored) {
+    return res.status(400).json({
+      status: "error",
+      message: "PKCE failed",
+    });
+  }
+
+  // GitHub token exchange
+  const gh = await axios.post(
+    "https://github.com/login/oauth/access_token",
+    {
+      client_id: process.env.GITHUB_CLIENT_ID,
+      client_secret: process.env.GITHUB_CLIENT_SECRET,
+      code,
+    },
+    { headers: { Accept: "application/json" } }
+  );
+
+  const userRes = await axios.get("https://api.github.com/user", {
+    headers: { Authorization: `Bearer ${gh.data.access_token}` },
+  });
+
+  let user = users.find(u => u.github_id === userRes.data.id);
+
+  if (!user) {
+    user = {
+      id: uuidv7(),
+      github_id: userRes.data.id,
+      username: userRes.data.login,
+      role: users.length === 0 ? "admin" : "analyst", // first user = admin
+      is_active: true,
+    };
+    users.push(user);
+  }
+
+  const access_token = signAccess(user);
+
+  const refresh_token = crypto.randomBytes(40).toString("hex");
+
+  refreshTokens.push({
+    token: refresh_token,
+    user,
+  });
+
+  pkceStore.delete(state);
 
   res.json({
     status: "success",
-    page: pageNum,
-    limit: limitNum,
-    total,
-    total_pages,
-    links: {
-      self: `/api/profiles?page=${pageNum}&limit=${limitNum}`,
-      next:
-        pageNum < total_pages
-          ? `/api/profiles?page=${pageNum + 1}&limit=${limitNum}`
-          : null,
-      prev:
-        pageNum > 1
-          ? `/api/profiles?page=${pageNum - 1}&limit=${limitNum}`
-          : null,
-    },
-    data,
+    access_token,
+    refresh_token,
   });
 });
 
-/* ================= CSV EXPORT ================= */
+// Refresh (STRICT POST)
+app.post("/auth/refresh", authLimiter, (req, res) => {
+  const { refresh_token } = req.body;
 
-app.get(
-  "/api/profiles/export",
-  authMiddleware,
-  (req: any, res: Response) => {
-    const parser = new Parser();
-    const csv = parser.parse(profiles);
-
-    res.header("Content-Type", "text/csv");
-    res.attachment(`profiles_${Date.now()}.csv`);
-    res.send(csv);
-  }
-);
-
-/* ================= SEARCH ================= */
-
-app.get("/api/profiles/search", authMiddleware, (req: any, res: Response) => {
-  const { q } = req.query;
-
-  if (!q) {
-    return res
-      .status(400)
-      .json({ status: "error", message: "Query required" });
+  if (!refresh_token) {
+    return res.status(400).json({
+      status: "error",
+      message: "refresh_token required",
+    });
   }
 
-  let result = profiles;
+  const stored = refreshTokens.find(t => t.token === refresh_token);
 
-  if (q.includes("young males")) {
-    result = result.filter(p => p.gender === "male" && p.age < 25);
+  if (!stored) {
+    return res.status(401).json({
+      status: "error",
+      message: "Invalid refresh token",
+    });
   }
+
+  // rotate
+  refreshTokens = refreshTokens.filter(t => t.token !== refresh_token);
+
+  const newAccess = signAccess(stored.user);
+  const newRefresh = crypto.randomBytes(40).toString("hex");
+
+  refreshTokens.push({ token: newRefresh, user: stored.user });
 
   res.json({
     status: "success",
+    access_token: newAccess,
+    refresh_token: newRefresh,
+  });
+});
+
+// Logout (STRICT POST)
+app.post("/auth/logout", authLimiter, (req, res) => {
+  const { refresh_token } = req.body;
+
+  if (!refresh_token) {
+    return res.status(400).json({
+      status: "error",
+      message: "refresh_token required",
+    });
+  }
+
+  refreshTokens = refreshTokens.filter(t => t.token !== refresh_token);
+
+  res.json({ status: "success" });
+});
+
+/* ================= USERS ================= */
+
+app.get("/api/users/me", auth, (req: any, res) => {
+  const user = users.find(u => u.id === req.user.id);
+
+  if (!user) {
+    return res.status(404).json({
+      status: "error",
+      message: "User not found",
+    });
+  }
+
+  res.json({ status: "success", data: user });
+});
+
+/* ================= PROFILES ================= */
+
+let profiles = Array.from({ length: 100 }).map((_, i) => ({
+  id: uuidv7(),
+  name: `Person ${i}`,
+  age: Math.floor(Math.random() * 60),
+  gender: i % 2 ? "male" : "female",
+  country_id: "NG",
+}));
+
+app.use("/api", version, apiLimiter);
+
+app.get("/api/profiles", auth, (req: any, res) => {
+  res.json({
+    status: "success",
     page: 1,
-    limit: result.length,
-    total: result.length,
+    limit: 10,
+    total: profiles.length,
     total_pages: 1,
     links: { self: "", next: null, prev: null },
-    data: result,
+    data: profiles.slice(0, 10),
   });
+});
+
+// Admin only
+app.post("/api/profiles", auth, allow(["admin"]), (req, res) => {
+  profiles.push(req.body);
+  res.json({ status: "success", data: req.body });
+});
+
+// CSV
+app.get("/api/profiles/export", auth, (req, res) => {
+  const parser = new Parser();
+  const csv = parser.parse(profiles);
+
+  res.header("Content-Type", "text/csv");
+  res.attachment("profiles.csv");
+  res.send(csv);
 });
 
 /* ================= START ================= */
